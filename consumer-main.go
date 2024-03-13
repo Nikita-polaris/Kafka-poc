@@ -8,25 +8,41 @@ import (
 	"syscall"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 
 	"poc-kafka/consumer"
 )
 
 var (
-	kafkaBrokers = "localhost:9092"
-	kafkaTopic   = "kafka-poc-1"
+	kafkaBrokers     string
+	kafkaTopic       string
+	postgresHost     string
+	postgresPort     string
+	postgresUser     string
+	postgresPassword string
+	postgresDB       string
+	blockSize        int
 )
 
-const (
-	postgresHost     = "localhost"
-	postgresPort     = 5432
-	postgresUser     = "kafka_user"
-	postgresPassword = "password"
-	postgresDB       = "kafkadb"
-	schemaName       = "schema_number"
-	blockSize        = 100
-)
+func init() {
+	// Load environment variables from .env file
+	if err := godotenv.Load(); err != nil {
+		fmt.Printf("Error loading .env file: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Set variables from environment variables
+	kafkaBrokers = os.Getenv("KAFKA_BROKERS")
+	kafkaTopic = os.Getenv("KAFKA_TOPIC")
+	postgresHost = os.Getenv("POSTGRES_HOST")
+	postgresPort = os.Getenv("POSTGRES_PORT")
+	postgresUser = os.Getenv("POSTGRES_USER")
+	postgresPassword = os.Getenv("POSTGRES_PASSWORD")
+	postgresDB = os.Getenv("POSTGRES_DB")
+	blockSize = 100
+
+}
 
 func checkPostgresConnection() error {
 	// Same as before
