@@ -1,43 +1,42 @@
 package consumer
 
 import (
-    "github.com/confluentinc/confluent-kafka-go/kafka"
-    
+	"github.com/confluentinc/confluent-kafka-go/kafka"
 )
 
 // KafkaConsumer implements the MessageConsumer interface for Kafka
 type KafkaConsumer struct {
-    Consumer *kafka.Consumer
-    Topic    string
+	Consumer *kafka.Consumer
+	Topic    string
 }
 
 func NewKafkaConsumer(consumer *kafka.Consumer, topic string) *KafkaConsumer {
-    return &KafkaConsumer{
-        Consumer: consumer,
-        Topic:    topic,
-    }
+	return &KafkaConsumer{
+
+		Consumer: consumer,
+		Topic:    topic,
+	}
 }
 
 // ConsumeMessages starts consuming messages from Kafka and calls the handler for each message
 func (c *KafkaConsumer) ConsumeMessages(handler MessageHandler) {
-    for {
-        ev := c.Consumer.Poll(100)
-        if ev == nil {
-            continue
-        }
+	for {
+		ev := c.Consumer.Poll(100)
+		if ev == nil {
+			continue
+		}
 
-        switch e := ev.(type) {
-        case *kafka.Message:
-            handler(e.Value)
+		switch e := ev.(type) {
+		case *kafka.Message:
+			handler(e.Value)
 
-        case kafka.Error:
-            // Handle Kafka errors
-        }
-    }
+		case kafka.Error:
+			// Handle Kafka errors
+		}
+	}
 }
 
 // func (c *KafkaConsumer) ProduceMessages(messages [][]byte) error {
-   
 
 //     brokerList := c.Consumer.GetMetadata(false)
 //     if brokerList == nil {
@@ -64,5 +63,21 @@ func (c *KafkaConsumer) ConsumeMessages(handler MessageHandler) {
 //         }
 //     }
 
-//     return nil
-// }
+//	    return nil
+//	}
+func (kc *KafkaConsumer) GetKafkaProducer() *kafka.Producer {
+	// Configuration for Kafka producer
+	config := &kafka.ConfigMap{
+		"bootstrap.servers": "localhost:9092",
+		// Add more configuration options as needed
+	}
+
+	// Create Kafka producer
+	producer, err := kafka.NewProducer(config)
+	if err != nil {
+		// Handle error
+		return nil
+	}
+
+	return producer
+}

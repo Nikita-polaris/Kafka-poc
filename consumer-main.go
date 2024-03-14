@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
@@ -23,6 +24,7 @@ var (
 	postgresPassword string
 	postgresDB       string
 	blockSize        int
+	async            bool
 )
 
 func init() {
@@ -41,13 +43,12 @@ func init() {
 	postgresPassword = os.Getenv("POSTGRES_PASSWORD")
 	postgresDB = os.Getenv("POSTGRES_DB")
 	blockSize = 100
-
+	async = true // Set to false for synchronous approach
 }
 
 func checkPostgresConnection() error {
-	// Same as before
 	// Construct the connection string
-	connectionString := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+	connectionString := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		postgresHost, postgresPort, postgresUser, postgresPassword, postgresDB)
 
 	// Open a connection to the PostgreSQL database
@@ -90,14 +91,14 @@ func consumeAndSaveNumbers(resultCh chan<- string, db *sql.DB, consumer consumer
 
 			fmt.Println("Block saved to PostgreSQL")
 
-			// Send NULL acknowledgment to Kafka
-			// producer := consumer.GetKafkaProducer()
-			// defer producer.Close()
+			// Mark block as NULL in Kafka
+			// combination of sync and async
 
-			// producer.Produce(&kafka.Message{
-			// 	TopicPartition: kafka.TopicPartition{Topic: &kafkaTopic, Partition: kafka.PartitionAny},
-			// 	Value:          []byte("NULL"),
-			// }, nil)
+			if async {
+				go markBlockAsNullAsync(consumer)
+			} else {
+				markBlockAsNullSync(consumer)
+			}
 
 			numbers = nil
 		}
@@ -112,34 +113,33 @@ func saveBlockToPostgres(db *sql.DB, numbers []string) error {
 		return nil
 	}
 
-	// Check for empty block
+	// Check for empty or NULL values
+	var values []string
 	for _, num := range numbers {
 		if num == "" {
 			return fmt.Errorf("empty value found in the block")
 		}
+		values = append(values, fmt.Sprintf("('%s')", num))
 	}
 
+	// Construct SQL query
+	query := fmt.Sprintf("INSERT INTO schema_number.numbers (value) VALUES %s", strings.Join(values, ","))
+
+	// Start transaction
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare("INSERT INTO schema_number.numbers (value) VALUES ($1)")
+	// Execute SQL query
+	_, err = tx.Exec(query)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
 
-	for _, num := range numbers {
-		_, err := stmt.Exec(num)
-		if err != nil {
-			return err
-		}
-	}
-
-	err = tx.Commit()
-	if err != nil {
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 
@@ -147,8 +147,33 @@ func saveBlockToPostgres(db *sql.DB, numbers []string) error {
 	return nil
 }
 
+func markBlockAsNullSync(consumer consumer.MessageConsumer) {
+	producer := consumer.GetKafkaProducer()
+	defer producer.Close()
+
+	for i := 0; i < blockSize; i++ {
+		// Produce NULL message to Kafka for each block element
+		producer.Produce(&kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &kafkaTopic, Partition: kafka.PartitionAny},
+			Value:          []byte("NULL"),
+		}, nil)
+	}
+}
+
+func markBlockAsNullAsync(consumer consumer.MessageConsumer) {
+	producer := consumer.GetKafkaProducer()
+	defer producer.Close()
+
+	for i := 0; i < blockSize; i++ {
+		// Produce NULL message to Kafka for each block element asynchronously
+		go producer.Produce(&kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &kafkaTopic, Partition: kafka.PartitionAny},
+			Value:          []byte("NULL"),
+		}, nil)
+	}
+}
 func main() {
-	db, err := sql.Open("postgres", fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+	db, err := sql.Open("postgres", fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		postgresHost, postgresPort, postgresUser, postgresPassword, postgresDB))
 	if err != nil {
 		fmt.Printf("Failed to connect to PostgreSQL: %v\n", err)
@@ -195,5 +220,4 @@ func main() {
 	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigchan
 	fmt.Println("Consumer shutting down...")
-
 }
